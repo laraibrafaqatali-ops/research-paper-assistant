@@ -14,7 +14,8 @@ load_dotenv()
 CHROMA_DIR = "./chroma_db"
 
 embeddings = GoogleGenerativeAIEmbeddings(
-    model="models/gemini-embedding-001"
+    model="models/gemini-embedding-001",
+    google_api_key=os.getenv("GOOGLE_API_KEY")
 )
 
 vectorstore = Chroma(
