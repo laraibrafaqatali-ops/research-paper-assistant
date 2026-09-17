@@ -13,11 +13,12 @@ app = FastAPI(
     title="Research Paper Assistant"
 )
 
-
 llm = ChatGoogleGenerativeAI(
     model="gemini-3.5-flash",
     temperature=0,
+    google_api_key=os.getenv("GOOGLE_API_KEY")
 )
+
 
 
 UPLOAD_DIR = "uploads"
