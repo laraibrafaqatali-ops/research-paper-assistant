@@ -14,13 +14,13 @@ app = FastAPI(
 )
 
 llm = ChatGoogleGenerativeAI(
-    model="gemini-3.5-flash",
+    model="gemini-1.5-flash",  # Gemini-3.5-flash standard key par nahi chalta, 1.5-flash update kiya hai
     temperature=0,
     google_api_key=os.getenv("GOOGLE_API_KEY")
 )
 
-
-UPLOAD_DIR = "uploads"
+# Vercel serverless environment ke liye /tmp directory use ki hai
+UPLOAD_DIR = "/tmp/uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
@@ -92,19 +92,14 @@ async def reset_papers():
     clear_vectorstore()
 
     # Delete uploaded PDF files
-    for filename in os.listdir(UPLOAD_DIR):
-
-        file_path = os.path.join(
-            UPLOAD_DIR,
-            filename
-        )
-
-        if os.path.isfile(file_path):
-            os.remove(file_path)
+    if os.path.exists(UPLOAD_DIR):
+        for filename in os.listdir(UPLOAD_DIR):
+            file_path = os.path.join(UPLOAD_DIR, filename)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
 
     return {
-        "message":
-        "All uploaded papers and stored document data have been cleared."
+        "message": "All uploaded papers and stored document data have been cleared."
     }
 
 
@@ -119,52 +114,27 @@ async def upload_papers(
     for file in files:
 
         if not file.filename.lower().endswith(".pdf"):
-
-            errors.append(
-                f"{file.filename}: Only PDF files are supported."
-            )
-
+            errors.append(f"{file.filename}: Only PDF files are supported.")
             continue
 
-        file_path = os.path.join(
-            UPLOAD_DIR,
-            file.filename
-        )
+        file_path = os.path.join(UPLOAD_DIR, file.filename)
 
         with open(file_path, "wb") as buffer:
-
-            shutil.copyfileobj(
-                file.file,
-                buffer
-            )
+            shutil.copyfileobj(file.file, buffer)
 
         try:
-
-            chunks = ingest_pdf(
-                file_path,
-                file.filename
-            )
+            chunks = ingest_pdf(file_path, file.filename)
 
             if chunks == 0:
-
-                errors.append(
-                    f"{file.filename}: No readable text found."
-                )
-
+                errors.append(f"{file.filename}: No readable text found.")
             else:
-
-                uploaded.append(
-                    {
-                        "filename": file.filename,
-                        "chunks": chunks
-                    }
-                )
+                uploaded.append({
+                    "filename": file.filename,
+                    "chunks": chunks
+                })
 
         except Exception as e:
-
-            errors.append(
-                f"{file.filename}: {str(e)}"
-            )
+            errors.append(f"{file.filename}: {str(e)}")
 
     return {
         "uploaded": uploaded,
@@ -180,60 +150,28 @@ async def ask_question(
     question = question.strip()
 
     if not question:
-
-        return {
-            "answer": "Question cannot be empty."
-        }
+        return {"answer": "Question cannot be empty."}
 
     if not os.path.exists(UPLOAD_DIR):
+        return {"answer": "Please upload at least one research paper first."}
 
-        return {
-            "answer":
-            "Please upload at least one research paper first."
-        }
-
-    pdf_files = [
-        f
-        for f in os.listdir(UPLOAD_DIR)
-        if f.lower().endswith(".pdf")
-    ]
+    pdf_files = [f for f in os.listdir(UPLOAD_DIR) if f.lower().endswith(".pdf")]
 
     if not pdf_files:
+        return {"answer": "Please upload at least one research paper first."}
 
-        return {
-            "answer":
-            "Please upload at least one research paper first."
-        }
-
-    results = search_documents(
-        question,
-        k=5
-    )
+    results = search_documents(question, k=5)
 
     if not results:
-
-        return {
-            "answer":
-            "The answer is not available in the uploaded documents."
-        }
+        return {"answer": "The answer is not available in the uploaded documents."}
 
     context_parts = []
 
     for doc in results:
-
-        source = doc.metadata.get(
-            "source",
-            "Unknown"
-        )
-
-        page = doc.metadata.get(
-            "page",
-            "Unknown"
-        )
-
+        source = doc.metadata.get("source", "Unknown")
+        page = doc.metadata.get("page", "Unknown")
         context_parts.append(
-            f"Source: {source}, Page: {page}\n"
-            f"{doc.page_content}"
+            f"Source: {source}, Page: {page}\n{doc.page_content}"
         )
 
     context = "\n\n".join(context_parts)
@@ -246,13 +184,9 @@ IMPORTANT RULES:
 1. Answer ONLY using the provided context.
 2. Do NOT use outside knowledge.
 3. Do NOT make up information.
-4. If the answer is not present in the context,
-   say exactly:
-
+4. If the answer is not present in the context, say exactly:
 "The answer is not available in the uploaded documents."
-
-5. Include the source document name and page number
-   for information used in the answer.
+5. Include the source document name and page number for information used in the answer.
 
 CONTEXT:
 {context}
@@ -266,30 +200,18 @@ QUESTION:
     answer = response.content
 
     if isinstance(answer, list):
-
         answer = "".join(
-            item.get("text", "")
-            if isinstance(item, dict)
-            else str(item)
+            item.get("text", "") if isinstance(item, dict) else str(item)
             for item in answer
         )
 
-    sources = []
-
-    for doc in results:
-
-        sources.append(
-            {
-                "document": doc.metadata.get(
-                    "source",
-                    "Unknown"
-                ),
-                "page": doc.metadata.get(
-                    "page",
-                    "Unknown"
-                )
-            }
-        )
+    sources = [
+        {
+            "document": doc.metadata.get("source", "Unknown"),
+            "page": doc.metadata.get("page", "Unknown")
+        }
+        for doc in results
+    ]
 
     return {
         "answer": answer,
