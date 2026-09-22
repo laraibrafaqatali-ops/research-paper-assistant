@@ -1,83 +1,110 @@
+```python
 import os
 
-from dotenv import load_dotenv
-from pypdf import PdfReader
-
-from langchain_core.documents import Document
+import chromadb
+from langchain_chroma import Chroma
+from langchain_community.document_loaders import PyPDFLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain_chroma import Chroma
 
 
-load_dotenv()
+# ============================================================
+# Gemini API Key
+# ============================================================
 
-CHROMA_DIR = "./chroma_db"
+GOOGLE_API_KEY = (
+    os.getenv("GOOGLE_API_KEY")
+    or os.getenv("GEMINI_API_KEY")
+)
+
+if not GOOGLE_API_KEY:
+    raise RuntimeError(
+        "GOOGLE_API_KEY or GEMINI_API_KEY environment variable is not set."
+    )
+
+
+# ============================================================
+# Gemini Embeddings
+# ============================================================
 
 embeddings = GoogleGenerativeAIEmbeddings(
-    model="models/gemini-embedding-001",
-    google_api_key=os.getenv("GOOGLE_API_KEY")
+    model="models/text-embedding-004",
+    google_api_key=GOOGLE_API_KEY,
 )
+
+
+# ============================================================
+# ChromaDB
+# ============================================================
+
+# IMPORTANT:
+# Vercel serverless environment ke liye PersistentClient
+# use nahi kar rahe. In-memory Chroma client use kar rahe hain.
+
+client = chromadb.Client()
+
 
 vectorstore = Chroma(
+    client=client,
     collection_name="research_papers",
     embedding_function=embeddings,
-    persist_directory=CHROMA_DIR,
 )
 
-text_splitter = RecursiveCharacterTextSplitter(
-    chunk_size=1000,
-    chunk_overlap=150,
-)
 
+# ============================================================
+# PDF Ingestion
+# ============================================================
 
 def ingest_pdf(file_path: str, filename: str):
 
-    reader = PdfReader(file_path)
+    loader = PyPDFLoader(file_path)
 
-    documents = []
+    docs = loader.load()
 
-    for page_number, page in enumerate(reader.pages, start=1):
+    text_splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1000,
+        chunk_overlap=200,
+    )
 
-        text = page.extract_text()
+    chunks = text_splitter.split_documents(docs)
 
-        if text and text.strip():
+    for chunk in chunks:
+        chunk.metadata["source"] = filename
 
-            documents.append(
-                Document(
-                    page_content=text,
-                    metadata={
-                        "source": filename,
-                        "page": page_number,
-                    },
-                )
-            )
-
-    if not documents:
-        return 0
-
-    chunks = text_splitter.split_documents(documents)
-
-    vectorstore.add_documents(chunks)
+    if chunks:
+        vectorstore.add_documents(chunks)
 
     return len(chunks)
 
 
-def search_documents(question: str, k: int = 5):
+# ============================================================
+# Search Documents
+# ============================================================
 
-    results = vectorstore.similarity_search(
-        question,
+def search_documents(query: str, k: int = 5):
+
+    return vectorstore.similarity_search(
+        query,
         k=k,
     )
 
-    return results
+
+# ============================================================
+# Clear Vector Store
+# ============================================================
+
 def clear_vectorstore():
 
     global vectorstore
 
-    vectorstore.delete_collection()
+    try:
+        client.delete_collection("research_papers")
+    except Exception:
+        pass
 
     vectorstore = Chroma(
+        client=client,
         collection_name="research_papers",
         embedding_function=embeddings,
-        persist_directory=CHROMA_DIR,
     )
+```
